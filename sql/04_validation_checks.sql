@@ -3,175 +3,454 @@
 -- File: 04_validation_checks.sql
 -- Database: PostgreSQL
 -- ============================================================
--- Data quality checks to run after 03_import_data.sql.
--- Each query should return 0 rows / 0 count if the data is clean.
--- Anything returned here is worth noting in the README as a
--- known data quality issue, since it affects how the delivery
--- and revenue metrics in 05_delivery_analysis_view.sql should
--- be interpreted.
+
+-- Purpose:
+-- Validate the imported Olist data before it is used for
+-- delivery, satisfaction and order-value analysis.
+--
+-- Each validation produces:
+--
+--   check_name
+--   issue_count
+--   status
+--
+-- A clean dataset should produce PASS for all checks.
+--
+-- Any FAIL should be investigated before relying on the
+-- analytical views.
+
+
+-- ============================================================
+-- 1. Data-quality validation summary
 -- ============================================================
 
--- ------------------------------------------------------------
--- 1. Duplicate primary keys
--- (should not be possible given the PK constraints, but useful
--- to run once before constraints are trusted, e.g. after a
--- schema change)
--- ------------------------------------------------------------
-SELECT customer_id, COUNT(*)
-FROM olist.customers
-GROUP BY customer_id
-HAVING COUNT(*) > 1;
+WITH validation_checks AS (
 
-SELECT order_id, COUNT(*)
-FROM olist.orders
-GROUP BY order_id
-HAVING COUNT(*) > 1;
+    -- --------------------------------------------------------
+    -- Duplicate customers
+    -- --------------------------------------------------------
 
-SELECT product_id, COUNT(*)
-FROM olist.products
-GROUP BY product_id
-HAVING COUNT(*) > 1;
+    SELECT
+        'Duplicate customer IDs' AS check_name,
+        COUNT(*) AS issue_count
+    FROM (
+        SELECT customer_id
+        FROM olist.customers
+        GROUP BY customer_id
+        HAVING COUNT(*) > 1
+    ) duplicates
 
-SELECT seller_id, COUNT(*)
-FROM olist.sellers
-GROUP BY seller_id
-HAVING COUNT(*) > 1;
 
--- ------------------------------------------------------------
--- 2. Orphaned records
--- No FK constraints were declared on purpose (Olist's raw
--- export has a small number of orphaned rows), so check for
--- them explicitly instead.
--- ------------------------------------------------------------
--- Orders with no matching customer
-SELECT o.order_id
-FROM olist.orders o
-LEFT JOIN olist.customers c ON o.customer_id = c.customer_id
-WHERE c.customer_id IS NULL;
+    UNION ALL
 
--- Order items with no matching order
-SELECT oi.order_id
-FROM olist.order_items oi
-LEFT JOIN olist.orders o ON oi.order_id = o.order_id
-WHERE o.order_id IS NULL;
 
--- Order items with no matching product
-SELECT oi.product_id
-FROM olist.order_items oi
-LEFT JOIN olist.products p ON oi.product_id = p.product_id
-WHERE p.product_id IS NULL;
+    -- --------------------------------------------------------
+    -- Duplicate orders
+    -- --------------------------------------------------------
 
--- Order items with no matching seller
-SELECT oi.seller_id
-FROM olist.order_items oi
-LEFT JOIN olist.sellers s ON oi.seller_id = s.seller_id
-WHERE s.seller_id IS NULL;
+    SELECT
+        'Duplicate order IDs',
+        COUNT(*)
+    FROM (
+        SELECT order_id
+        FROM olist.orders
+        GROUP BY order_id
+        HAVING COUNT(*) > 1
+    ) duplicates
 
--- Payments with no matching order
-SELECT op.order_id
-FROM olist.order_payments op
-LEFT JOIN olist.orders o ON op.order_id = o.order_id
-WHERE o.order_id IS NULL;
 
--- Reviews with no matching order
-SELECT rv.order_id
-FROM olist.order_reviews rv
-LEFT JOIN olist.orders o ON rv.order_id = o.order_id
-WHERE o.order_id IS NULL;
+    UNION ALL
 
--- Products with a category not present in the translation table
-SELECT DISTINCT p.product_category_name
-FROM olist.products p
-LEFT JOIN olist.product_category_translation t
-    ON p.product_category_name = t.product_category_name
-WHERE p.product_category_name IS NOT NULL
-  AND t.product_category_name IS NULL;
 
--- ------------------------------------------------------------
--- 3. Null / missing critical fields
--- ------------------------------------------------------------
-SELECT COUNT(*) AS orders_missing_status
-FROM olist.orders
-WHERE order_status IS NULL;
+    -- --------------------------------------------------------
+    -- Duplicate products
+    -- --------------------------------------------------------
 
-SELECT COUNT(*) AS orders_missing_purchase_ts
-FROM olist.orders
-WHERE order_purchase_timestamp IS NULL;
+    SELECT
+        'Duplicate product IDs',
+        COUNT(*)
+    FROM (
+        SELECT product_id
+        FROM olist.products
+        GROUP BY product_id
+        HAVING COUNT(*) > 1
+    ) duplicates
 
-SELECT COUNT(*) AS delivered_orders_missing_delivery_date
-FROM olist.orders
-WHERE order_status = 'delivered'
-  AND order_delivered_customer_date IS NULL;
 
-SELECT COUNT(*) AS items_missing_price_or_freight
-FROM olist.order_items
-WHERE price IS NULL OR freight_value IS NULL;
+    UNION ALL
 
--- ------------------------------------------------------------
--- 4. Business-logic / date-order sanity checks
--- ------------------------------------------------------------
--- Delivered before it was purchased (should never happen)
-SELECT order_id, order_purchase_timestamp, order_delivered_customer_date
-FROM olist.orders
-WHERE order_delivered_customer_date IS NOT NULL
-  AND order_delivered_customer_date < order_purchase_timestamp;
 
--- Delivered to the carrier after it reached the customer
-SELECT order_id, order_delivered_carrier_date, order_delivered_customer_date
-FROM olist.orders
-WHERE order_delivered_carrier_date IS NOT NULL
-  AND order_delivered_customer_date IS NOT NULL
-  AND order_delivered_carrier_date > order_delivered_customer_date;
+    -- --------------------------------------------------------
+    -- Duplicate sellers
+    -- --------------------------------------------------------
 
--- Negative prices or freight values
-SELECT order_id, order_item_id, price, freight_value
-FROM olist.order_items
-WHERE price < 0 OR freight_value < 0;
+    SELECT
+        'Duplicate seller IDs',
+        COUNT(*)
+    FROM (
+        SELECT seller_id
+        FROM olist.sellers
+        GROUP BY seller_id
+        HAVING COUNT(*) > 1
+    ) duplicates
 
--- Review scores outside the expected 1-5 range
--- (belt-and-braces check; the CHECK constraint should prevent this)
-SELECT review_id, review_score
-FROM olist.order_reviews
-WHERE review_score IS NOT NULL
-  AND review_score NOT BETWEEN 1 AND 5;
 
--- Duplicate reviews for the same order
-SELECT order_id, COUNT(*) AS review_count
-FROM olist.order_reviews
-GROUP BY order_id
-HAVING COUNT(*) > 1;
+    UNION ALL
 
--- ------------------------------------------------------------
--- 5. Order status breakdown
--- Confirms what proportion of orders are usable for delivery
--- analysis (only 'delivered' orders have a full timestamp trail).
--- ------------------------------------------------------------
+
+    -- --------------------------------------------------------
+    -- Orders without customers
+    -- --------------------------------------------------------
+
+    SELECT
+        'Orders without matching customers',
+        COUNT(*)
+    FROM olist.orders o
+    LEFT JOIN olist.customers c
+        ON o.customer_id = c.customer_id
+    WHERE c.customer_id IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Order items without orders
+    -- --------------------------------------------------------
+
+    SELECT
+        'Order items without matching orders',
+        COUNT(*)
+    FROM olist.order_items oi
+    LEFT JOIN olist.orders o
+        ON oi.order_id = o.order_id
+    WHERE o.order_id IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Order items without products
+    -- --------------------------------------------------------
+
+    SELECT
+        'Order items without matching products',
+        COUNT(*)
+    FROM olist.order_items oi
+    LEFT JOIN olist.products p
+        ON oi.product_id = p.product_id
+    WHERE p.product_id IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Order items without sellers
+    -- --------------------------------------------------------
+
+    SELECT
+        'Order items without matching sellers',
+        COUNT(*)
+    FROM olist.order_items oi
+    LEFT JOIN olist.sellers s
+        ON oi.seller_id = s.seller_id
+    WHERE s.seller_id IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Payments without orders
+    -- --------------------------------------------------------
+
+    SELECT
+        'Payments without matching orders',
+        COUNT(*)
+    FROM olist.order_payments op
+    LEFT JOIN olist.orders o
+        ON op.order_id = o.order_id
+    WHERE o.order_id IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Reviews without orders
+    -- --------------------------------------------------------
+
+    SELECT
+        'Reviews without matching orders',
+        COUNT(*)
+    FROM olist.order_reviews r
+    LEFT JOIN olist.orders o
+        ON r.order_id = o.order_id
+    WHERE o.order_id IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Products without category translation
+    -- --------------------------------------------------------
+
+    SELECT
+        'Products without category translation',
+        COUNT(*)
+    FROM (
+        SELECT DISTINCT p.product_category_name
+        FROM olist.products p
+        LEFT JOIN olist.product_category_translation t
+            ON p.product_category_name = t.product_category_name
+        WHERE p.product_category_name IS NOT NULL
+          AND t.product_category_name IS NULL
+    ) unmatched_categories
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Orders missing purchase timestamp
+    -- --------------------------------------------------------
+
+    SELECT
+        'Orders missing purchase timestamp',
+        COUNT(*)
+    FROM olist.orders
+    WHERE order_purchase_timestamp IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Delivered orders missing delivery date
+    -- --------------------------------------------------------
+
+    SELECT
+        'Delivered orders missing customer delivery date',
+        COUNT(*)
+    FROM olist.orders
+    WHERE order_status = 'delivered'
+      AND order_delivered_customer_date IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Order items missing price/freight
+    -- --------------------------------------------------------
+
+    SELECT
+        'Order items missing price or freight',
+        COUNT(*)
+    FROM olist.order_items
+    WHERE price IS NULL
+       OR freight_value IS NULL
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Negative prices/freight
+    -- --------------------------------------------------------
+
+    SELECT
+        'Order items with negative price/freight',
+        COUNT(*)
+    FROM olist.order_items
+    WHERE price < 0
+       OR freight_value < 0
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Invalid review scores
+    -- --------------------------------------------------------
+
+    SELECT
+        'Invalid review scores',
+        COUNT(*)
+    FROM olist.order_reviews
+    WHERE review_score IS NOT NULL
+      AND review_score NOT BETWEEN 1 AND 5
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Delivered before purchase
+    -- --------------------------------------------------------
+
+    SELECT
+        'Orders delivered before purchase',
+        COUNT(*)
+    FROM olist.orders
+    WHERE order_delivered_customer_date IS NOT NULL
+      AND order_delivered_customer_date < order_purchase_timestamp
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Carrier date after customer delivery date
+    -- --------------------------------------------------------
+
+    SELECT
+        'Orders with carrier date after customer delivery',
+        COUNT(*)
+    FROM olist.orders
+    WHERE order_delivered_carrier_date IS NOT NULL
+      AND order_delivered_customer_date IS NOT NULL
+      AND order_delivered_carrier_date > order_delivered_customer_date
+
+
+    UNION ALL
+
+
+    -- --------------------------------------------------------
+    -- Reviews duplicated by order
+    -- --------------------------------------------------------
+
+    SELECT
+        'Orders with multiple review records',
+        COUNT(*)
+    FROM (
+        SELECT order_id
+        FROM olist.order_reviews
+        GROUP BY order_id
+        HAVING COUNT(*) > 1
+    ) duplicate_reviews
+)
+
+
+-- ============================================================
+-- Final validation result
+-- ============================================================
+
 SELECT
+
+    check_name,
+
+    issue_count,
+
+    CASE
+        WHEN issue_count = 0 THEN 'PASS'
+        ELSE 'FAIL'
+    END AS status
+
+FROM validation_checks
+
+ORDER BY
+    CASE
+        WHEN issue_count = 0 THEN 1
+        ELSE 0
+    END,
+    check_name;
+
+
+-- ============================================================
+-- 2. Order status breakdown
+-- ============================================================
+
+-- Shows how many orders fall into each status and what proportion
+-- of the full dataset they represent.
+
+SELECT
+
     order_status,
+
     COUNT(*) AS order_count,
-    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_orders
+
+    ROUND(
+        100.0 * COUNT(*)
+        / SUM(COUNT(*)) OVER (),
+        2
+    ) AS pct_of_orders
+
 FROM olist.orders
+
 GROUP BY order_status
+
 ORDER BY order_count DESC;
 
--- ------------------------------------------------------------
--- 6. Row count reconciliation against source CSVs
--- Fill in the expected counts from the raw files and compare.
--- ------------------------------------------------------------
-SELECT 'customers' AS table_name, COUNT(*) AS loaded_rows FROM olist.customers
-UNION ALL
-SELECT 'orders', COUNT(*) FROM olist.orders
-UNION ALL
-SELECT 'order_items', COUNT(*) FROM olist.order_items
-UNION ALL
-SELECT 'order_payments', COUNT(*) FROM olist.order_payments
-UNION ALL
-SELECT 'order_reviews', COUNT(*) FROM olist.order_reviews
-UNION ALL
-SELECT 'products', COUNT(*) FROM olist.products
-UNION ALL
-SELECT 'sellers', COUNT(*) FROM olist.sellers
-UNION ALL
-SELECT 'geolocation', COUNT(*) FROM olist.geolocation
-ORDER BY table_name;
 
+-- ============================================================
+-- 3. Loaded row counts
+-- ============================================================
+
+-- Confirms the final size of each raw table.
+
+SELECT
+    'customers' AS table_name,
+    COUNT(*) AS loaded_rows
+FROM olist.customers
+
+UNION ALL
+
+SELECT
+    'geolocation',
+    COUNT(*)
+FROM olist.geolocation
+
+UNION ALL
+
+SELECT
+    'order_items',
+    COUNT(*)
+FROM olist.order_items
+
+UNION ALL
+
+SELECT
+    'order_payments',
+    COUNT(*)
+FROM olist.order_payments
+
+UNION ALL
+
+SELECT
+    'order_reviews',
+    COUNT(*)
+FROM olist.order_reviews
+
+UNION ALL
+
+SELECT
+    'orders',
+    COUNT(*)
+FROM olist.orders
+
+UNION ALL
+
+SELECT
+    'product_category_translation',
+    COUNT(*)
+FROM olist.product_category_translation
+
+UNION ALL
+
+SELECT
+    'products',
+    COUNT(*)
+FROM olist.products
+
+UNION ALL
+
+SELECT
+    'sellers',
+    COUNT(*)
+FROM olist.sellers
+
+ORDER BY table_name;
