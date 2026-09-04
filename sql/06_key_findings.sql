@@ -27,9 +27,6 @@
 
 /* ============================================================
    1. OVERALL DELIVERY RELIABILITY
-
-   Business question:
-   What proportion of delivered orders were late?
    ============================================================ */
 
 SELECT
@@ -56,15 +53,6 @@ ORDER BY
 
 /* ============================================================
    2. LATE DELIVERY VS CUSTOMER SATISFACTION
-
-   Business question:
-   Are late deliveries associated with lower customer
-   review scores?
-
-   We compare:
-   - Average review score
-   - Negative review rate
-   - Positive review rate
    ============================================================ */
 
 SELECT
@@ -108,12 +96,6 @@ ORDER BY
 
 /* ============================================================
    3. REVIEW SCORE DISTRIBUTION
-
-   Business question:
-   Does the distribution of review scores differ between
-   late and on-time deliveries?
-
-   This is more informative than looking only at averages.
    ============================================================ */
 
 SELECT
@@ -148,13 +130,6 @@ ORDER BY
 
 /* ============================================================
    4. LATE DELIVERY AND ORDER VALUE
-
-   Business question:
-   How much order value is associated with late deliveries?
-
-   "order_value" = product price + freight value.
-
-   It is not accounting revenue or profit.
    ============================================================ */
 
 SELECT
@@ -192,10 +167,6 @@ ORDER BY
 
 /* ============================================================
    5. ESTIMATED VS ACTUAL DELIVERY PERFORMANCE
-
-   Business question:
-   How much longer do late orders take compared with
-   their estimated delivery time?
    ============================================================ */
 
 SELECT
@@ -239,11 +210,8 @@ ORDER BY
 /* ============================================================
    6. STATE DELIVERY PERFORMANCE
 
-   Business question:
-   Which customer states have the worst delivery reliability?
-
-   A minimum of 100 delivered orders is required so that
-   very small states do not dominate the ranking.
+   Minimum 100 orders to avoid rankings being dominated by
+   very small states.
    ============================================================ */
 
 SELECT
@@ -290,11 +258,6 @@ ORDER BY
 
 /* ============================================================
    7. BEST-PERFORMING STATES
-
-   Business question:
-   Which states have the strongest delivery reliability?
-
-   Only states with at least 100 delivered orders are included.
    ============================================================ */
 
 SELECT
@@ -331,10 +294,6 @@ ORDER BY
 
 /* ============================================================
    8. PRODUCT CATEGORY PERFORMANCE
-
-   Business question:
-   Which product categories experience the highest proportion
-   of late deliveries?
    ============================================================ */
 
 SELECT
@@ -377,18 +336,12 @@ ORDER BY
 /* ============================================================
    9. CATEGORY VALUE AT RISK
 
-   Business question:
-   Which product categories have the greatest amount of
-   order value associated with late deliveries?
+   Estimated late order value is calculated as:
 
-   This combines:
-   - Delivery reliability
-   - Commercial importance
+       total_order_value × pct_late / 100
 
-   The category view already aggregates order value, so
-   estimated late order value is calculated from:
-
-       total_order_value × pct_late
+   The category view already contains the aggregated
+   total_order_value and pct_late metrics.
    ============================================================ */
 
 SELECT
@@ -425,12 +378,6 @@ ORDER BY
 
 /* ============================================================
    10. SELLER HANDLING TIME
-
-   Business question:
-   Are longer seller handling times associated with late
-   deliveries?
-
-   Orders are divided into handling-time bands.
    ============================================================ */
 
 SELECT
@@ -477,10 +424,6 @@ ORDER BY
 
 /* ============================================================
    11. CARRIER SHIPPING TIME
-
-   Business question:
-   Are longer carrier shipping times associated with late
-   deliveries?
    ============================================================ */
 
 SELECT
@@ -527,13 +470,6 @@ ORDER BY
 
 /* ============================================================
    12. SELLER VS CARRIER CONTRIBUTION
-
-   Business question:
-   Is the delay more strongly associated with seller handling
-   or carrier shipping time?
-
-   We compare average seller handling and carrier shipping
-   times between late and on-time orders.
    ============================================================ */
 
 SELECT
@@ -571,9 +507,6 @@ ORDER BY
 
 /* ============================================================
    13. MONTHLY DELIVERY RELIABILITY
-
-   Business question:
-   Has delivery reliability changed over time?
    ============================================================ */
 
 SELECT
@@ -623,9 +556,6 @@ ORDER BY
 
 /* ============================================================
    14. YEARLY DELIVERY PERFORMANCE
-
-   Business question:
-   Does overall delivery performance differ by year?
    ============================================================ */
 
 SELECT
@@ -682,26 +612,38 @@ ORDER BY
    Business question:
    How severe are late deliveries?
 
-   This separates slightly late orders from severely delayed
-   orders.
+   A CTE is used so the delay_band alias can safely be used
+   for ordering in the outer query.
    ============================================================ */
 
+WITH delay_bands AS (
+
+    SELECT
+        CASE
+            WHEN delivery_delay_days <= 0
+                THEN 'On Time'
+
+            WHEN delivery_delay_days <= 2
+                THEN '1-2 days late'
+
+            WHEN delivery_delay_days <= 7
+                THEN '3-7 days late'
+
+            WHEN delivery_delay_days <= 14
+                THEN '8-14 days late'
+
+            ELSE '15+ days late'
+        END AS delay_band,
+
+        review_score,
+        order_value
+
+    FROM olist.vw_order_delivery_metrics
+
+)
+
 SELECT
-    CASE
-        WHEN delivery_delay_days <= 0
-            THEN 'On Time'
-
-        WHEN delivery_delay_days <= 2
-            THEN '1-2 days late'
-
-        WHEN delivery_delay_days <= 7
-            THEN '3-7 days late'
-
-        WHEN delivery_delay_days <= 14
-            THEN '8-14 days late'
-
-        ELSE '15+ days late'
-    END AS delay_band,
+    delay_band,
 
     COUNT(*) AS order_count,
 
@@ -726,7 +668,7 @@ SELECT
         2
     ) AS total_order_value
 
-FROM olist.vw_order_delivery_metrics
+FROM delay_bands
 
 GROUP BY
     delay_band
@@ -738,6 +680,7 @@ ORDER BY
         WHEN '3-7 days late' THEN 3
         WHEN '8-14 days late' THEN 4
         WHEN '15+ days late' THEN 5
+        ELSE 6
     END;
 
 
@@ -796,8 +739,8 @@ FROM olist.vw_order_delivery_metrics;
    Business question:
    Are higher-value orders more likely to be late?
 
-   Orders are divided into four equally sized groups
-   based on order value.
+   Orders are divided into four equally sized groups based
+   on order value.
    ============================================================ */
 
 WITH value_bands AS (
