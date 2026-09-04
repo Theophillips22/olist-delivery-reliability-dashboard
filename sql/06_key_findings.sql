@@ -314,8 +314,8 @@ ORDER BY
    9. CATEGORY VALUE AT RISK
 
    Business question:
-   Which categories have the greatest amount of order value
-   associated with late deliveries?
+   Which product categories have the greatest amount of
+   order value associated with late deliveries?
 
    This combines:
    - Delivery reliability
@@ -325,48 +325,34 @@ ORDER BY
 SELECT
     product_category,
 
-    COUNT(*) AS category_order_count,
+    order_count,
 
     ROUND(
-        SUM(category_order_value),
+        total_order_value,
         2
     ) AS total_order_value,
 
     ROUND(
-        SUM(
-            CASE
-                WHEN delivery_status = 'Late'
-                THEN category_order_value
-                ELSE 0
-            END
-        ),
+        total_order_value * pct_late / 100.0,
         2
-    ) AS late_order_value,
+    ) AS estimated_late_order_value,
 
     ROUND(
-        100.0 *
-        SUM(
-            CASE
-                WHEN delivery_status = 'Late'
-                THEN category_order_value
-                ELSE 0
-            END
-        )
-        / NULLIF(SUM(category_order_value), 0),
+        pct_late,
         2
-    ) AS pct_category_value_late
+    ) AS pct_late,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score
 
 FROM olist.vw_category_delivery_performance
 
-GROUP BY
-    product_category
-
-HAVING
-    COUNT(*) >= 100
+WHERE order_count >= 100
 
 ORDER BY
-    late_order_value DESC;
-
+    estimated_late_order_value DESC;
 
 /* ============================================================
    10. SELLER HANDLING TIME
