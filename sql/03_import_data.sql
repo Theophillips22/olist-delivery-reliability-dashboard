@@ -67,117 +67,63 @@ RESTART IDENTITY;
 -- 2. Import sellers
 -- ============================================================
 
-\copy olist.sellers
-FROM 'olist_sellers_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.sellers FROM 'olist_sellers_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 3. Import product category translations
 -- ============================================================
 
-\copy olist.product_category_translation
-FROM 'product_category_name_translation.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.product_category_translation FROM 'product_category_name_translation.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 4. Import customers
 -- ============================================================
 
-\copy olist.customers
-FROM 'olist_customers_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.customers FROM 'olist_customers_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 5. Import products
 -- ============================================================
 
-\copy olist.products
-FROM 'olist_products_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.products FROM 'olist_products_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 6. Import orders
 -- ============================================================
 
-\copy olist.orders
-FROM 'olist_orders_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.orders FROM 'olist_orders_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 7. Import order items
 -- ============================================================
 
-\copy olist.order_items
-FROM 'olist_order_items_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.order_items FROM 'olist_order_items_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 8. Import order payments
 -- ============================================================
 
-\copy olist.order_payments
-FROM 'olist_order_payments_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.order_payments FROM 'olist_order_payments_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 9. Import order reviews
 -- ============================================================
 
-\copy olist.order_reviews
-FROM 'olist_order_reviews_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.order_reviews FROM 'olist_order_reviews_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
 -- 10. Import geolocation
 -- ============================================================
 
-\copy olist.geolocation
-FROM 'olist_geolocation_dataset.csv'
-WITH (
-    FORMAT csv,
-    HEADER true,
-    ENCODING 'UTF8'
-);
+\copy olist.geolocation FROM 'olist_geolocation_dataset.csv' WITH ( FORMAT csv, HEADER true, ENCODING 'UTF8' );
 
 
 -- ============================================================
