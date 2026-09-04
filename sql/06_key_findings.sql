@@ -1,0 +1,850 @@
+/* ============================================================
+   06_key_findings.sql
+
+   Purpose:
+   Answer the main business questions for the Olist
+   delivery reliability analysis.
+
+   Main questions:
+   1. How common are late deliveries?
+   2. Are late deliveries associated with lower review scores?
+   3. How much order value is associated with late deliveries?
+   4. Which states have the worst delivery reliability?
+   5. Which product categories are most affected?
+   6. Is seller handling or carrier shipping the bigger issue?
+   7. How does delivery reliability change over time?
+   8. How severe are late deliveries?
+   9. Are higher-value orders more likely to be late?
+
+   All analysis is based on the analytical views created
+   in 05_delivery_analysis_view.sql.
+
+   Note:
+   "order_value" represents product price + freight value.
+   It should not be interpreted as accounting revenue or profit.
+   ============================================================ */
+
+
+/* ============================================================
+   1. OVERALL DELIVERY RELIABILITY
+   ============================================================ */
+
+SELECT
+    delivery_status,
+    order_count,
+    ROUND(pct_of_orders, 2) AS pct_of_orders,
+    ROUND(avg_delivery_days, 2) AS avg_delivery_days,
+    ROUND(avg_delivery_delay_days, 2) AS avg_delivery_delay_days,
+    ROUND(avg_review_score, 2) AS avg_review_score,
+    ROUND(pct_negative_reviews, 2) AS pct_negative_reviews,
+    ROUND(pct_positive_reviews, 2) AS pct_positive_reviews,
+    ROUND(avg_order_value, 2) AS avg_order_value,
+    ROUND(total_order_value, 2) AS total_order_value
+
+FROM olist.vw_delivery_reliability_summary
+
+ORDER BY
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END;
+
+
+/* ============================================================
+   2. LATE DELIVERY VS CUSTOMER SATISFACTION
+   ============================================================ */
+
+SELECT
+    delivery_status,
+
+    COUNT(*) AS reviewed_orders,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS avg_review_score,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE review_score <= 2
+        ) / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_negative_reviews,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE review_score >= 4
+        ) / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_positive_reviews
+
+FROM olist.vw_order_delivery_metrics
+
+WHERE review_score IS NOT NULL
+
+GROUP BY
+    delivery_status
+
+ORDER BY
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END;
+
+
+/* ============================================================
+   3. REVIEW SCORE DISTRIBUTION
+   ============================================================ */
+
+SELECT
+    delivery_status,
+    review_score,
+    COUNT(*) AS order_count,
+
+    ROUND(
+        100.0 * COUNT(*)
+        / SUM(COUNT(*)) OVER (
+            PARTITION BY delivery_status
+        ),
+        2
+    ) AS pct_of_status_orders
+
+FROM olist.vw_order_delivery_metrics
+
+WHERE review_score IS NOT NULL
+
+GROUP BY
+    delivery_status,
+    review_score
+
+ORDER BY
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END,
+    review_score;
+
+
+/* ============================================================
+   4. LATE DELIVERY AND ORDER VALUE
+   ============================================================ */
+
+SELECT
+    delivery_status,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        SUM(order_value),
+        2
+    ) AS total_order_value,
+
+    ROUND(
+        AVG(order_value),
+        2
+    ) AS avg_order_value,
+
+    ROUND(
+        100.0 * SUM(order_value)
+        / NULLIF(
+            SUM(SUM(order_value)) OVER (),
+            0
+        ),
+        2
+    ) AS pct_of_total_order_value
+
+FROM olist.vw_order_delivery_metrics
+
+GROUP BY
+    delivery_status
+
+ORDER BY
+    total_order_value DESC;
+
+
+/* ============================================================
+   5. ESTIMATED VS ACTUAL DELIVERY PERFORMANCE
+   ============================================================ */
+
+SELECT
+    delivery_status,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        AVG(estimated_delivery_days),
+        2
+    ) AS avg_estimated_delivery_days,
+
+    ROUND(
+        AVG(actual_delivery_days),
+        2
+    ) AS avg_actual_delivery_days,
+
+    ROUND(
+        AVG(delivery_delay_days),
+        2
+    ) AS avg_delivery_delay_days,
+
+    ROUND(
+        MAX(delivery_delay_days),
+        2
+    ) AS max_delivery_delay_days
+
+FROM olist.vw_order_delivery_metrics
+
+GROUP BY
+    delivery_status
+
+ORDER BY
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END;
+
+
+/* ============================================================
+   6. STATE DELIVERY PERFORMANCE
+
+   Minimum 100 orders to avoid rankings being dominated by
+   very small states.
+   ============================================================ */
+
+SELECT
+    customer_state,
+    order_count,
+
+    ROUND(
+        pct_late,
+        2
+    ) AS pct_late,
+
+    ROUND(
+        pct_on_time,
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        avg_delivery_days,
+        2
+    ) AS avg_delivery_days,
+
+    ROUND(
+        avg_delivery_delay_days,
+        2
+    ) AS avg_delivery_delay_days,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score,
+
+    ROUND(
+        total_order_value,
+        2
+    ) AS total_order_value
+
+FROM olist.vw_state_delivery_performance
+
+WHERE order_count >= 100
+
+ORDER BY
+    pct_late DESC;
+
+
+/* ============================================================
+   7. BEST-PERFORMING STATES
+   ============================================================ */
+
+SELECT
+    customer_state,
+    order_count,
+
+    ROUND(
+        pct_on_time,
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        pct_late,
+        2
+    ) AS pct_late,
+
+    ROUND(
+        avg_delivery_days,
+        2
+    ) AS avg_delivery_days,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score
+
+FROM olist.vw_state_delivery_performance
+
+WHERE order_count >= 100
+
+ORDER BY
+    pct_on_time DESC;
+
+
+/* ============================================================
+   8. PRODUCT CATEGORY PERFORMANCE
+   ============================================================ */
+
+SELECT
+    product_category,
+    order_count,
+
+    ROUND(
+        pct_late,
+        2
+    ) AS pct_late,
+
+    ROUND(
+        pct_on_time,
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        avg_delivery_days,
+        2
+    ) AS avg_delivery_days,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score,
+
+    ROUND(
+        total_order_value,
+        2
+    ) AS total_order_value
+
+FROM olist.vw_category_delivery_performance
+
+WHERE order_count >= 100
+
+ORDER BY
+    pct_late DESC;
+
+
+/* ============================================================
+   9. CATEGORY VALUE AT RISK
+
+   Estimated late order value is calculated as:
+
+       total_order_value × pct_late / 100
+
+   The category view already contains the aggregated
+   total_order_value and pct_late metrics.
+   ============================================================ */
+
+SELECT
+    product_category,
+    order_count,
+
+    ROUND(
+        total_order_value,
+        2
+    ) AS total_order_value,
+
+    ROUND(
+        total_order_value * pct_late / 100.0,
+        2
+    ) AS estimated_late_order_value,
+
+    ROUND(
+        pct_late,
+        2
+    ) AS pct_late,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score
+
+FROM olist.vw_category_delivery_performance
+
+WHERE order_count >= 100
+
+ORDER BY
+    estimated_late_order_value DESC;
+
+
+/* ============================================================
+   10. SELLER HANDLING TIME
+   ============================================================ */
+
+SELECT
+    CASE
+        WHEN seller_handling_days < 2
+            THEN 'Under 2 days'
+
+        WHEN seller_handling_days < 4
+            THEN '2-3 days'
+
+        WHEN seller_handling_days < 7
+            THEN '4-6 days'
+
+        ELSE '7+ days'
+    END AS seller_handling_band,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        AVG(seller_handling_days),
+        2
+    ) AS avg_seller_handling_days,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE delivery_status = 'Late'
+        ) / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_late,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS avg_review_score
+
+FROM olist.vw_order_delivery_metrics
+
+GROUP BY
+    seller_handling_band
+
+ORDER BY
+    MIN(seller_handling_days);
+
+
+/* ============================================================
+   11. CARRIER SHIPPING TIME
+   ============================================================ */
+
+SELECT
+    CASE
+        WHEN carrier_shipping_days < 2
+            THEN 'Under 2 days'
+
+        WHEN carrier_shipping_days < 5
+            THEN '2-4 days'
+
+        WHEN carrier_shipping_days < 8
+            THEN '5-7 days'
+
+        ELSE '8+ days'
+    END AS carrier_shipping_band,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        AVG(carrier_shipping_days),
+        2
+    ) AS avg_carrier_shipping_days,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE delivery_status = 'Late'
+        ) / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_late,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS avg_review_score
+
+FROM olist.vw_order_delivery_metrics
+
+GROUP BY
+    carrier_shipping_band
+
+ORDER BY
+    MIN(carrier_shipping_days);
+
+
+/* ============================================================
+   12. SELLER VS CARRIER CONTRIBUTION
+   ============================================================ */
+
+SELECT
+    delivery_status,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        AVG(seller_handling_days),
+        2
+    ) AS avg_seller_handling_days,
+
+    ROUND(
+        AVG(carrier_shipping_days),
+        2
+    ) AS avg_carrier_shipping_days,
+
+    ROUND(
+        AVG(delivery_delay_days),
+        2
+    ) AS avg_delivery_delay_days
+
+FROM olist.vw_order_delivery_metrics
+
+GROUP BY
+    delivery_status
+
+ORDER BY
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END;
+
+
+/* ============================================================
+   13. MONTHLY DELIVERY RELIABILITY
+   ============================================================ */
+
+SELECT
+    order_month,
+    order_count,
+
+    ROUND(
+        total_order_value,
+        2
+    ) AS total_order_value,
+
+    ROUND(
+        avg_order_value,
+        2
+    ) AS avg_order_value,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score,
+
+    ROUND(
+        pct_on_time,
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        pct_late,
+        2
+    ) AS pct_late,
+
+    ROUND(
+        avg_delivery_days,
+        2
+    ) AS avg_delivery_days,
+
+    ROUND(
+        avg_delivery_delay_days,
+        2
+    ) AS avg_delivery_delay_days
+
+FROM olist.vw_monthly_sales_performance
+
+ORDER BY
+    order_month;
+
+
+/* ============================================================
+   14. YEARLY DELIVERY PERFORMANCE
+   ============================================================ */
+
+SELECT
+    order_year,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        SUM(order_value),
+        2
+    ) AS total_order_value,
+
+    ROUND(
+        AVG(order_value),
+        2
+    ) AS avg_order_value,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS avg_review_score,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE delivery_status = 'On Time'
+        ) / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE delivery_status = 'Late'
+        ) / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_late,
+
+    ROUND(
+        AVG(delivery_delay_days),
+        2
+    ) AS avg_delivery_delay_days
+
+FROM olist.vw_order_delivery_metrics
+
+GROUP BY
+    order_year
+
+ORDER BY
+    order_year;
+
+
+/* ============================================================
+   15. DELIVERY DELAY BANDS
+
+   Business question:
+   How severe are late deliveries?
+
+   A CTE is used so the delay_band alias can safely be used
+   for ordering in the outer query.
+   ============================================================ */
+
+WITH delay_bands AS (
+
+    SELECT
+        CASE
+            WHEN delivery_delay_days <= 0
+                THEN 'On Time'
+
+            WHEN delivery_delay_days <= 2
+                THEN '1-2 days late'
+
+            WHEN delivery_delay_days <= 7
+                THEN '3-7 days late'
+
+            WHEN delivery_delay_days <= 14
+                THEN '8-14 days late'
+
+            ELSE '15+ days late'
+        END AS delay_band,
+
+        review_score,
+        order_value
+
+    FROM olist.vw_order_delivery_metrics
+
+)
+
+SELECT
+    delay_band,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        100.0 * COUNT(*)
+        / SUM(COUNT(*)) OVER (),
+        2
+    ) AS pct_of_orders,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS avg_review_score,
+
+    ROUND(
+        AVG(order_value),
+        2
+    ) AS avg_order_value,
+
+    ROUND(
+        SUM(order_value),
+        2
+    ) AS total_order_value
+
+FROM delay_bands
+
+GROUP BY
+    delay_band
+
+ORDER BY
+    CASE delay_band
+        WHEN 'On Time' THEN 1
+        WHEN '1-2 days late' THEN 2
+        WHEN '3-7 days late' THEN 3
+        WHEN '8-14 days late' THEN 4
+        WHEN '15+ days late' THEN 5
+        ELSE 6
+    END;
+
+
+/* ============================================================
+   16. SEVERELY DELAYED ORDERS
+
+   Business question:
+   What proportion of orders and order value is associated
+   with orders that were more than 7 days late?
+   ============================================================ */
+
+SELECT
+
+    COUNT(*) FILTER (
+        WHERE delivery_delay_days > 7
+    ) AS severely_delayed_orders,
+
+    COUNT(*) AS total_orders,
+
+    ROUND(
+        100.0 *
+        COUNT(*) FILTER (
+            WHERE delivery_delay_days > 7
+        )
+        / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_severely_delayed_orders,
+
+    ROUND(
+        SUM(order_value) FILTER (
+            WHERE delivery_delay_days > 7
+        ),
+        2
+    ) AS severely_delayed_order_value,
+
+    ROUND(
+        SUM(order_value),
+        2
+    ) AS total_order_value,
+
+    ROUND(
+        100.0 *
+        SUM(order_value) FILTER (
+            WHERE delivery_delay_days > 7
+        )
+        / NULLIF(SUM(order_value), 0),
+        2
+    ) AS pct_order_value_severely_delayed
+
+FROM olist.vw_order_delivery_metrics;
+
+
+/* ============================================================
+   17. HIGH-VALUE ORDERS VS DELIVERY RELIABILITY
+
+   Business question:
+   Are higher-value orders more likely to be late?
+
+   Orders are divided into four equally sized groups based
+   on order value.
+   ============================================================ */
+
+WITH value_bands AS (
+
+    SELECT
+        *,
+        NTILE(4) OVER (
+            ORDER BY order_value
+        ) AS value_quartile
+
+    FROM olist.vw_order_delivery_metrics
+
+)
+
+SELECT
+    value_quartile,
+
+    COUNT(*) AS order_count,
+
+    ROUND(
+        AVG(order_value),
+        2
+    ) AS avg_order_value,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE delivery_status = 'Late'
+        )
+        / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_late,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS avg_review_score
+
+FROM value_bands
+
+GROUP BY
+    value_quartile
+
+ORDER BY
+    value_quartile;
+
+
+/* ============================================================
+   18. FINAL EXECUTIVE SUMMARY
+
+   Compact set of headline metrics for the eventual
+   Tableau dashboard and GitHub README.
+   ============================================================ */
+
+SELECT
+
+    COUNT(*) AS total_delivered_orders,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE delivery_status = 'Late'
+        )
+        / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_late,
+
+    ROUND(
+        100.0 * COUNT(*) FILTER (
+            WHERE delivery_status = 'On Time'
+        )
+        / NULLIF(COUNT(*), 0),
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS overall_avg_review_score,
+
+    ROUND(
+        AVG(delivery_delay_days) FILTER (
+            WHERE delivery_status = 'Late'
+        ),
+        2
+    ) AS avg_delay_among_late_orders,
+
+    ROUND(
+        SUM(order_value),
+        2
+    ) AS total_order_value,
+
+    ROUND(
+        SUM(order_value) FILTER (
+            WHERE delivery_status = 'Late'
+        ),
+        2
+    ) AS late_order_value,
+
+    ROUND(
+        100.0 *
+        SUM(order_value) FILTER (
+            WHERE delivery_status = 'Late'
+        )
+        / NULLIF(SUM(order_value), 0),
+        2
+    ) AS pct_order_value_late
+
+FROM olist.vw_order_delivery_metrics;
