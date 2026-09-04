@@ -11,12 +11,17 @@
    3. How much order value is associated with late deliveries?
    4. Which states have the worst delivery reliability?
    5. Which product categories are most affected?
-   6. Is seller handling or carrier shipping associated with delays?
+   6. Is seller handling or carrier shipping the bigger issue?
    7. How does delivery reliability change over time?
-   8. What are the characteristics of late vs on-time orders?
+   8. How severe are late deliveries?
+   9. Are higher-value orders more likely to be late?
 
    All analysis is based on the analytical views created
    in 05_delivery_analysis_view.sql.
+
+   Note:
+   "order_value" represents product price + freight value.
+   It should not be interpreted as accounting revenue or profit.
    ============================================================ */
 
 
@@ -30,14 +35,17 @@
 SELECT
     delivery_status,
     order_count,
-    pct_of_orders,
-    avg_delivery_days,
-    avg_delivery_delay_days,
-    avg_review_score,
-    pct_negative_reviews,
-    avg_order_value,
-    total_order_value
+    ROUND(pct_of_orders, 2) AS pct_of_orders,
+    ROUND(avg_delivery_days, 2) AS avg_delivery_days,
+    ROUND(avg_delivery_delay_days, 2) AS avg_delivery_delay_days,
+    ROUND(avg_review_score, 2) AS avg_review_score,
+    ROUND(pct_negative_reviews, 2) AS pct_negative_reviews,
+    ROUND(pct_positive_reviews, 2) AS pct_positive_reviews,
+    ROUND(avg_order_value, 2) AS avg_order_value,
+    ROUND(total_order_value, 2) AS total_order_value
+
 FROM olist.vw_delivery_reliability_summary
+
 ORDER BY
     CASE
         WHEN delivery_status = 'Late' THEN 1
@@ -61,8 +69,13 @@ ORDER BY
 
 SELECT
     delivery_status,
+
     COUNT(*) AS reviewed_orders,
-    ROUND(AVG(review_score), 2) AS avg_review_score,
+
+    ROUND(
+        AVG(review_score),
+        2
+    ) AS avg_review_score,
 
     ROUND(
         100.0 * COUNT(*) FILTER (
@@ -86,7 +99,11 @@ GROUP BY
     delivery_status
 
 ORDER BY
-    delivery_status;
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END;
 
 
 /* ============================================================
@@ -121,7 +138,11 @@ GROUP BY
     review_score
 
 ORDER BY
-    delivery_status,
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END,
     review_score;
 
 
@@ -131,10 +152,7 @@ ORDER BY
    Business question:
    How much order value is associated with late deliveries?
 
-   Important:
-   In this project "order_value" represents:
-
-       product price + freight value
+   "order_value" = product price + freight value.
 
    It is not accounting revenue or profit.
    ============================================================ */
@@ -156,7 +174,10 @@ SELECT
 
     ROUND(
         100.0 * SUM(order_value)
-        / SUM(SUM(order_value)) OVER (),
+        / NULLIF(
+            SUM(SUM(order_value)) OVER (),
+            0
+        ),
         2
     ) AS pct_of_total_order_value
 
@@ -208,7 +229,11 @@ GROUP BY
     delivery_status
 
 ORDER BY
-    delivery_status;
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END;
 
 
 /* ============================================================
@@ -217,19 +242,43 @@ ORDER BY
    Business question:
    Which customer states have the worst delivery reliability?
 
-   We require at least 100 delivered orders so that very
-   small states do not dominate the ranking.
+   A minimum of 100 delivered orders is required so that
+   very small states do not dominate the ranking.
    ============================================================ */
 
 SELECT
     customer_state,
     order_count,
-    ROUND(pct_late, 2) AS pct_late,
-    ROUND(pct_on_time, 2) AS pct_on_time,
-    ROUND(avg_delivery_days, 2) AS avg_delivery_days,
-    ROUND(avg_delivery_delay_days, 2) AS avg_delivery_delay_days,
-    ROUND(avg_review_score, 2) AS avg_review_score,
-    ROUND(total_order_value, 2) AS total_order_value
+
+    ROUND(
+        pct_late,
+        2
+    ) AS pct_late,
+
+    ROUND(
+        pct_on_time,
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        avg_delivery_days,
+        2
+    ) AS avg_delivery_days,
+
+    ROUND(
+        avg_delivery_delay_days,
+        2
+    ) AS avg_delivery_delay_days,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score,
+
+    ROUND(
+        total_order_value,
+        2
+    ) AS total_order_value
 
 FROM olist.vw_state_delivery_performance
 
@@ -245,17 +294,32 @@ ORDER BY
    Business question:
    Which states have the strongest delivery reliability?
 
-   Again, only states with at least 100 delivered orders
-   are included.
+   Only states with at least 100 delivered orders are included.
    ============================================================ */
 
 SELECT
     customer_state,
     order_count,
-    ROUND(pct_on_time, 2) AS pct_on_time,
-    ROUND(pct_late, 2) AS pct_late,
-    ROUND(avg_delivery_days, 2) AS avg_delivery_days,
-    ROUND(avg_review_score, 2) AS avg_review_score
+
+    ROUND(
+        pct_on_time,
+        2
+    ) AS pct_on_time,
+
+    ROUND(
+        pct_late,
+        2
+    ) AS pct_late,
+
+    ROUND(
+        avg_delivery_days,
+        2
+    ) AS avg_delivery_days,
+
+    ROUND(
+        avg_review_score,
+        2
+    ) AS avg_review_score
 
 FROM olist.vw_state_delivery_performance
 
@@ -320,11 +384,15 @@ ORDER BY
    This combines:
    - Delivery reliability
    - Commercial importance
+
+   The category view already aggregates order value, so
+   estimated late order value is calculated from:
+
+       total_order_value × pct_late
    ============================================================ */
 
 SELECT
     product_category,
-
     order_count,
 
     ROUND(
@@ -354,6 +422,7 @@ WHERE order_count >= 100
 ORDER BY
     estimated_late_order_value DESC;
 
+
 /* ============================================================
    10. SELLER HANDLING TIME
 
@@ -361,7 +430,7 @@ ORDER BY
    Are longer seller handling times associated with late
    deliveries?
 
-   We divide orders into handling-time bands.
+   Orders are divided into handling-time bands.
    ============================================================ */
 
 SELECT
@@ -493,7 +562,11 @@ GROUP BY
     delivery_status
 
 ORDER BY
-    delivery_status;
+    CASE
+        WHEN delivery_status = 'Late' THEN 1
+        WHEN delivery_status = 'On Time' THEN 2
+        ELSE 3
+    END;
 
 
 /* ============================================================
@@ -505,7 +578,6 @@ ORDER BY
 
 SELECT
     order_month,
-
     order_count,
 
     ROUND(
@@ -673,8 +745,8 @@ ORDER BY
    16. SEVERELY DELAYED ORDERS
 
    Business question:
-   What proportion of order value is associated with orders
-   that were more than 7 days late?
+   What proportion of orders and order value is associated
+   with orders that were more than 7 days late?
    ============================================================ */
 
 SELECT
@@ -719,12 +791,13 @@ FROM olist.vw_order_delivery_metrics;
 
 
 /* ============================================================
-   17. HIGH-VALUE LATE ORDERS
+   17. HIGH-VALUE ORDERS VS DELIVERY RELIABILITY
 
    Business question:
-   Are expensive orders more likely to be late?
+   Are higher-value orders more likely to be late?
 
-   Orders are divided into quartiles based on order value.
+   Orders are divided into four equally sized groups
+   based on order value.
    ============================================================ */
 
 WITH value_bands AS (
@@ -774,8 +847,8 @@ ORDER BY
 /* ============================================================
    18. FINAL EXECUTIVE SUMMARY
 
-   This produces a compact set of headline metrics that can
-   eventually be used for the Tableau dashboard.
+   Compact set of headline metrics for the eventual
+   Tableau dashboard and GitHub README.
    ============================================================ */
 
 SELECT
@@ -785,14 +858,16 @@ SELECT
     ROUND(
         100.0 * COUNT(*) FILTER (
             WHERE delivery_status = 'Late'
-        ) / NULLIF(COUNT(*), 0),
+        )
+        / NULLIF(COUNT(*), 0),
         2
     ) AS pct_late,
 
     ROUND(
         100.0 * COUNT(*) FILTER (
             WHERE delivery_status = 'On Time'
-        ) / NULLIF(COUNT(*), 0),
+        )
+        / NULLIF(COUNT(*), 0),
         2
     ) AS pct_on_time,
 
